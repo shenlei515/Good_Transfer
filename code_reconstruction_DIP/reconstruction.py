@@ -178,8 +178,8 @@ def main():
     #     checkdir(dir)
 
     save_img_dir = os.path.join("/home/comp/20481896/", "datasets/cifar10")
-    save_model_dir= os.path.join("/home/comp/20481896/", "DecoupleGradVariance/experiments/standalone/DecoupleGradVariance/checkpoints")
-    target_path = os.path.join(save_model_dir, "partition_alpha=0.1checkpoint-server-standalone-FedAvg-resnet18_v2-cifar10-128-0.1-no-hetero-0.1-False-epoch-999-default.pth")
+    save_model_dir= os.path.join("/home/comp/20481896/", "HPFL/experiments/standalone")
+    target_path = os.path.join(save_model_dir, "10client_FedAvg_resnet18_v2_cifar10_1000_round_alpha=0.1.pth")
     args.output_dir = save_model_dir
     checkdir(args.output_dir)
 
@@ -341,75 +341,72 @@ def main():
             # for pi in range(len(args.pretrained)):
             targets = pretrained_model(img, name=args.which_layer).detach()
             # out_path = os.path.join(args.output_dir, args.which_layer, filename[batch_i])
-            out_path = os.path.join(args.output_dir, args.which_layer, f"reconIMG{[batch_i]}-mean.png")
-
-            for img_i in range(5):
-                real_path = os.path.join(args.output_dir, args.which_layer, f"RealIMG{[batch_i]}-{img_i}.png")
-                real_img = postp(img[img_i].data.cpu().squeeze())
-                real_img.save(real_path)
-
-            real_path = os.path.join(args.output_dir, args.which_layer, f"RealIMG{[batch_i]}-mean.png")
-            real_img = postp(img.mean(dim=0).data.cpu().squeeze())
-            real_img.save(real_path)
-
-            target = targets.mean(dim=0)
-            # noised_targets = [target]
-            DP_degree = [0, 0.001, 0.01, 0.1, 0.5]
+            # out_path = os.path.join(args.output_dir, args.which_layer, f"reconIMG{[batch_i]}-{img_i}.png")
+            
+            DP_degree = [0, 1.0, 10.0, 100.0, 1000.0]
             for i, std in enumerate(DP_degree):
                 # noised_targets.append[target + torch.normal(mean=torch.ones(target.shape)*0.0, std=std)]
                 if std > 0.0:
-                    noised_target = target + torch.normal(mean=torch.ones(target.shape)*0.0, std=std).cuda()
+                    noised_targets = targets + torch.normal(mean=torch.ones(target.shape)*0.0, std=std).cuda()
                 else:
-                    noised_target = target + 0.0
-                out_path = os.path.join(args.output_dir, args.which_layer, f"reconIMG{[batch_i]}-mean-DP{std}.png")
-                if not os.path.exists(out_path):
-                    print('%d-%d'%(batch_i, batch_i))
-                    start=time.time()
-                    pad = 'zero'  # 'refection'
-                    net = skip(input_depth, 3, num_channels_down=[16, 32, 64, 128, 128, 128],
-                                num_channels_up=[16, 32, 64, 128, 128, 128],
-                                num_channels_skip=[4, 4, 4, 4, 4, 4],
-                                filter_size_down=[7, 7, 5, 5, 3, 3], filter_size_up=[7, 7, 5, 5, 3, 3],
-                                upsample_mode='nearest', downsample_mode='avg',
-                                need_sigmoid=False, pad=pad, act_fun='LeakyReLU').type(img.type())
+                    noised_targets = targets + 0.0
+            
+                for img_i in range(img.size()[0]):
+                    real_path = os.path.join(args.output_dir, args.which_layer, f"RealIMG{[batch_i]}-{img_i}.png")
+                    real_img = postp(img[img_i].data.cpu().squeeze())
+                    real_img.save(real_path)
 
-                    net_input = get_noise(input_depth, imsize_net).type(img.type()).detach()
-                    out = net(net_input)[:, :, :imsize, :imsize]
-                    print(out.size())
+                    noised_target = noised_targets[img_i]
+                
+                    out_path = os.path.join(args.output_dir, args.which_layer, f"reconIMG{[batch_i]}-{img_i}-noise{std}.png")
+                    if not os.path.exists(out_path):
+                        print('%d-%d'%(batch_i, img_i))
+                        start=time.time()
+                        pad = 'zero'  # 'refection'
+                        net = skip(input_depth, 3, num_channels_down=[16, 32, 64, 128, 128, 128],
+                                    num_channels_up=[16, 32, 64, 128, 128, 128],
+                                    num_channels_skip=[4, 4, 4, 4, 4, 4],
+                                    filter_size_down=[7, 7, 5, 5, 3, 3], filter_size_up=[7, 7, 5, 5, 3, 3],
+                                    upsample_mode='nearest', downsample_mode='avg',
+                                    need_sigmoid=False, pad=pad, act_fun='LeakyReLU').type(img.type())
 
-                    # Compute number of parameters
-                    s = sum(np.prod(list(p.size())) for p in net.parameters())
-                    print('Number of params: %d' % s)
+                        net_input = get_noise(input_depth, imsize_net).type(img.type()).detach()
+                        out = net(net_input)[:, :, :imsize, :imsize]
+                        print(out.size())
+
+                        # Compute number of parameters
+                        s = sum(np.prod(list(p.size())) for p in net.parameters())
+                        print('Number of params: %d' % s)
 
 
-                    # run style transfer
-                    max_iter = args.max_iter
-                    show_iter = 50
-                    optimizer = optim.Adam(get_params('net', net, net_input), lr=args.lr)
-                    n_iter = [0]
+                        # run style transfer
+                        max_iter = args.max_iter
+                        show_iter = 50
+                        optimizer = optim.Adam(get_params('net', net, net_input), lr=args.lr)
+                        n_iter = [0]
 
-                    while n_iter[0] <= max_iter:
+                        while n_iter[0] <= max_iter:
 
-                        def closure():
-                            optimizer.zero_grad()
-                            out = pretrained_model(net(net_input)[:, :, :imsize, :imsize], name=args.which_layer)
-                            loss = criterion(out, noised_target) #+ criterion2(net_input)*1e-2
-                            loss.backward()
-                            n_iter[0] += 1
-                            # print loss
-                            if n_iter[0] % show_iter == (show_iter - 1):
-                                print('Iteration: %d, loss: %f' % (n_iter[0] + 1, loss.item()))
-                            return loss
+                            def closure():
+                                optimizer.zero_grad()
+                                out = pretrained_model(net(net_input)[:, :, :imsize, :imsize], name=args.which_layer)
+                                loss = criterion(out, noised_target) #+ criterion2(net_input)*1e-2
+                                loss.backward()
+                                n_iter[0] += 1
+                                # print loss
+                                if n_iter[0] % show_iter == (show_iter - 1):
+                                    print('Iteration: %d, loss: %f' % (n_iter[0] + 1, loss.item()))
+                                return loss
 
-                        optimizer.step(closure)
-                    out_img = postp(net(net_input)[:, :, :imsize, :imsize].data[0].cpu().squeeze())
-                    # plt.imshow(out_img)
-                    # plt.show()
-                    end = time.time()
-                    print('Time:'+str(end-start))
+                            optimizer.step(closure)
+                        out_img = postp(net(net_input)[:, :, :imsize, :imsize].data[0].cpu().squeeze())
+                        # plt.imshow(out_img)
+                        # plt.show()
+                        end = time.time()
+                        print('Time:'+str(end-start))
 
-                    checkdir(os.path.dirname(out_path))
-                    out_img.save(out_path)
+                        checkdir(os.path.dirname(out_path))
+                        out_img.save(out_path)
 
 
 if __name__ == '__main__':
